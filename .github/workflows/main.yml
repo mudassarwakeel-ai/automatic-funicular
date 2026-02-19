@@ -1,4 +1,4 @@
-name: Random Password Windows RDP
+name: Random Password Windows RDP (Fixed)
 
 on:
   workflow_dispatch:
@@ -9,25 +9,32 @@ jobs:
     timeout-minutes: 360
 
     steps:
-    - name: Generate Random Password & Enable RDP
+    - name: Setup User & Enable RDP
       shell: powershell
       run: |
-        # Generate strong random password
-        Add-Type -AssemblyName System.Web
-        $password = [System.Web.Security.Membership]::GeneratePassword(16,4)
+        # Generate 12-character strong password (avoids 14-char legacy warning)
+        $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%"
+        $password = -join ((1..12) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
 
-        # Create user
-        net user runneradmin $password /add
-        net localgroup administrators runneradmin /add
+        # Check if user exists
+        if (Get-LocalUser -Name "runneradmin" -ErrorAction SilentlyContinue) {
+            net user runneradmin $password
+        } else {
+            net user runneradmin $password /add
+        }
+
+        # Add to administrators (ignore error if already member)
+        try {
+            Add-LocalGroupMember -Group "Administrators" -Member "runneradmin" -ErrorAction Stop
+        } catch {}
 
         # Enable RDP
         Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
         Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
 
-        # Save password for later steps
         echo "RDP_PASSWORD=$password" >> $env:GITHUB_ENV
 
-    - name: Download Ngrok (Fast)
+    - name: Download Ngrok
       shell: powershell
       run: |
         Invoke-WebRequest https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip -OutFile ngrok.zip
